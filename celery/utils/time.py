@@ -4,16 +4,23 @@ import os
 import random
 import time as _time
 from calendar import monthrange
-from datetime import date, datetime, timedelta, tzinfo
+from datetime import date, datetime, timedelta, tzinfo, timezone
+import datetime
 
 from kombu.utils.functional import reprcall
 from kombu.utils.objects import cached_property
-from pytz import AmbiguousTimeError, FixedOffset
 from pytz import timezone as _timezone
-from pytz import utc
 
 from .functional import dictfilter
 from .text import pluralize
+
+
+import sys
+if sys.version_info >= (3, 9):
+    from zoneinfo import ZoneInfo
+else:
+    from backports.zoneinfo import ZoneInfo
+
 
 __all__ = (
     'LocalTimezone', 'timezone', 'maybe_timedelta',
@@ -45,6 +52,8 @@ TIME_UNITS = (
 ZERO = timedelta(0)
 
 _local_timezone = None
+
+utc = ZoneInfo("UTC")
 
 
 class LocalTimezone(tzinfo):
@@ -86,10 +95,11 @@ class LocalTimezone(tzinfo):
         # I'd rather rely on pytz to do this, than port
         # the C code from cpython's fromutc [asksol]
         offset = int(self.utcoffset(dt).seconds / 60.0)
-        try:
+        if offset in self._offset_cache:
             tz = self._offset_cache[offset]
-        except KeyError:
-            tz = self._offset_cache[offset] = FixedOffset(offset)
+        else:
+            tz = self._offset_cache[offset] = timezone(
+                timedelta(minutes=offset))
         return tz.fromutc(dt.replace(tzinfo=tz))
 
     def _isdst(self, dt):
@@ -189,7 +199,9 @@ def remaining(start, ends_in, now=None, relative=False):
         ~datetime.timedelta: Remaining time.
     """
     now = now or datetime.utcnow()
-    if str(start.tzinfo) == str(now.tzinfo) and now.utcoffset() != start.utcoffset():
+    if str(
+            start.tzinfo) == str(
+            now.tzinfo) and now.utcoffset() != start.utcoffset():
         # DST started/ended
         start = start.replace(tzinfo=now.tzinfo)
     end_date = start + ends_in
@@ -266,17 +278,7 @@ def is_naive(dt):
 
 def make_aware(dt, tz):
     """Set timezone for a :class:`~datetime.datetime` object."""
-    try:
-        _localize = tz.localize
-    except AttributeError:
-        return dt.replace(tzinfo=tz)
-    else:
-        # works on pytz timezones
-        try:
-            return _localize(dt, is_dst=None)
-        except AmbiguousTimeError:
-            return min(_localize(dt, is_dst=True),
-                       _localize(dt, is_dst=False))
+    return dt.replace(tzinfo=tz)
 
 
 def localize(dt, tz):
@@ -285,18 +287,7 @@ def localize(dt, tz):
         dt = make_aware(dt, tz)
     if dt.tzinfo == utc:
         dt = dt.astimezone(tz)  # Always safe to call astimezone on utc zones
-    try:
-        _normalize = tz.normalize
-    except AttributeError:  # non-pytz tz
-        return dt
-    else:
-        try:
-            return _normalize(dt, is_dst=None)
-        except TypeError:
-            return _normalize(dt)
-        except AmbiguousTimeError:
-            return min(_normalize(dt, is_dst=True),
-                       _normalize(dt, is_dst=False))
+    return dt
 
 
 def to_utc(dt):

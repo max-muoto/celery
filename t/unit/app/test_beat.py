@@ -4,12 +4,17 @@ from pickle import dumps, loads
 from unittest.mock import Mock, call, patch
 
 import pytest
-import pytz
 
 from celery import __version__, beat, uuid
 from celery.beat import BeatLazyFunc, event_t
 from celery.schedules import crontab, schedule
 from celery.utils.objects import Bunch
+
+import sys
+if sys.version_info >= (3, 9):
+    from zoneinfo import ZoneInfo
+else:
+    from backports.zoneinfo import ZoneInfo
 
 
 class MockShelve(dict):
@@ -194,7 +199,9 @@ class test_Scheduler:
         foo.apply_async = Mock(name='foo.apply_async')
 
         scheduler = mScheduler(app=self.app)
-        scheduler.apply_async(scheduler.Entry(task=foo.name, app=self.app, args=None, kwargs=None))
+        scheduler.apply_async(
+            scheduler.Entry(
+                task=foo.name, app=self.app, args=None, kwargs=None))
         foo.apply_async.assert_called()
 
     def test_apply_async_with_null_args_set_to_none(self):
@@ -432,9 +439,10 @@ class test_Scheduler:
         assert a.schedule['bar'].schedule._next_run_at == 40
 
     def test_when(self):
-        now_time_utc = datetime(2000, 10, 10, 10, 10, 10, 10, tzinfo=pytz.utc)
+        now_time_utc = datetime(2000, 10, 10, 10, 10,
+                                10, 10, tzinfo=ZoneInfo("UTC"))
         now_time_casey = now_time_utc.astimezone(
-            pytz.timezone('Antarctica/Casey')
+            ZoneInfo('Antarctica/Casey')
         )
         scheduler = mScheduler(app=self.app)
         result_utc = scheduler._when(
@@ -731,7 +739,8 @@ class test_Service:
 
     def get_service(self):
         Scheduler, mock_shelve = create_persistent_scheduler()
-        return beat.Service(app=self.app, scheduler_cls=Scheduler), mock_shelve
+        return beat.Service(
+            app=self.app, scheduler_cls=Scheduler), mock_shelve
 
     def test_pickleable(self):
         s = beat.Service(app=self.app, scheduler_cls=Mock)
